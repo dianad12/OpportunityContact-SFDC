@@ -1,0 +1,73 @@
+trigger OpportunityMarketingContactPopulate on  Opportunity (before insert, before update) {
+    Set<Opportunity> opps_missing_marketing_contact = new Set<Opportunity>();
+    Map<String,String> opportunity_to_account = new  Map<String,String>();
+    
+    for(Opportunity o: trigger.new){
+        if(o.Opportunity_Marketing_Contact__c == null && o.Type != 'Upsell - Expansion' && o.Type != 'Upsell - Cross Product' && o.Type != 'Upgrade - SaaS CC' && o.Type != 'Upsell at Renewal'){
+            opps_missing_marketing_contact.add(o);
+            opportunity_to_account.put(o.id,o.accountid);
+        }
+    } 
+    
+    List<Contact> all_account_contacts_mql_ch = new List<Contact>();
+      
+    all_account_contacts_mql_ch = [Select Id, MQL_date__c, AccountID, ch1_Channel__c from Contact WHERE MQL_date__c != null and AccountId In :opportunity_to_account.values() and ( ch1_Channel__c != null or (Contact_Source__c != null and Responded_Date__c = LAST_N_DAYS:31) ) and (Contact_Source__c != 'Dotcom Signup - Large Company' or (Contact_Source__c = 'Dotcom Signup - Large Company' and Responded_Date__c != null))];
+  
+  
+    List<Contact> account_contacts = new List<Contact>();
+    String current_account_id = '';
+    Contact earliest_contact = new Contact();
+    List<Opportunity> opps_to_update = new List<Opportunity>();
+    if(opps_missing_marketing_contact != null){
+        for(Opportunity o: opps_missing_marketing_contact){
+            
+            if(o.AccountId !=null){
+            current_account_id = o.AccountId;
+            }
+            else{
+                continue;
+            }
+            
+            system.debug(all_account_contacts_mql_ch);
+            
+            if(all_account_contacts_mql_ch != null && all_account_contacts_mql_ch.size() != 0){
+                for(Contact c: all_account_contacts_mql_ch){
+                    
+                    if(c.accountid != null && c.accountid == current_account_id){
+                        account_contacts.add(c);
+                    }
+                }
+            }
+            else{
+                break;
+            }
+            
+            if(account_contacts == null || account_contacts.size() ==0){
+                o.Opportunity_Marketing_Contact__c = null;
+                account_contacts = null;   
+            }
+            else{
+                earliest_contact =  account_contacts[0];
+                    
+                for(Contact loop_contact: account_contacts){
+                    if(loop_contact.MQL_date__c < earliest_contact.MQL_date__c){
+                        earliest_contact = loop_contact;
+                    }
+                } 
+    
+                
+                if((Trigger.isUpdate && earliest_contact.MQL_date__c <= o.CreatedDate) ||  (Trigger.isInsert)){
+                    o.Opportunity_Marketing_Contact__c = earliest_contact.id;
+                    opps_to_update.add(o);
+                    
+                }
+                earliest_contact = null;
+               
+            }
+            account_contacts = null;
+            current_account_id = null;
+        }
+    }
+}
+
+                                        	
